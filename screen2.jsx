@@ -1,0 +1,448 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Wifi, 
+  Video, 
+  Server, 
+  Activity, 
+  Battery, 
+  Maximize, 
+  Crosshair, 
+  Cpu, 
+  Zap, 
+  Thermometer,
+  AlertTriangle,
+  Radio,
+  Box,
+  Eye,
+  Disc,
+  Target,
+  Signal,
+  Aperture,
+  Bot,
+  Play,
+  Pause,
+  RotateCw,
+  MapPin,
+  FileVideo
+} from 'lucide-react';
+
+// --- 数据模拟 ---
+// 1. 生成 14 个摄像头
+const CAMERAS = Array.from({ length: 14 }).map((_, i) => ({
+    type: 'camera',
+    id: `C-${String(i + 1).padStart(2, '0')}`,
+    name: `CAM-${String(i + 1).padStart(2, '0')}`,
+    status: Math.random() > 0.1 ? 'online' : (Math.random() > 0.5 ? 'offline' : 'fault'),
+    region: i < 6 ? '室内货架' : (i < 10 ? '地堆区' : '验收区')
+}));
+
+// 2. 生成 2 个机器人
+const ROBOTS = [
+    { type: 'robot', id: 'R-01', name: 'R-01 [作业]', battery: 82, temp: 42, cpu: 45, speed: 1.2, status: 'active' },
+    { type: 'robot', id: 'R-02', name: 'R-02 [巡航]', battery: 45, temp: 48, cpu: 32, speed: 0.8, status: 'active' }
+];
+
+// 3. 合并为 16 个设备
+const ALL_DEVICES = [...CAMERAS, ...ROBOTS];
+
+// --- 组件 ---
+
+// 1. 头部
+const Header = () => (
+  <div className="flex justify-between items-center px-8 py-4 border-b border-cyan-900/30 bg-[#020408] relative shrink-0 z-50">
+    <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent"></div>
+    <div className="flex items-center space-x-3">
+      <div className="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/30">
+        <Box className="w-6 h-6 text-cyan-400" />
+      </div>
+      <div>
+        <h1 className="text-2xl font-bold text-white tracking-wider">全景数字孪生平台</h1>
+        <p className="text-xs text-cyan-500/70 uppercase tracking-[0.2em]">Digital Twin & Hardware Monitor</p>
+      </div>
+    </div>
+    <div className="flex items-center space-x-2 text-cyan-300 font-mono text-sm border border-cyan-500/30 px-3 py-1 rounded bg-cyan-900/10">
+      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+      <span>孪生引擎：运行中</span>
+    </div>
+  </div>
+);
+
+// 2. 全域感知矩阵 (16宫格)
+const HardwareMatrix = ({ devices, activeIndex, onSelect }) => {
+    return (
+        <div className="flex flex-col h-full p-4 overflow-hidden relative">
+            <div className="flex justify-between items-center mb-3 shrink-0">
+                <h3 className="text-cyan-400 font-bold flex items-center text-sm tracking-wider">
+                    <Server className="w-4 h-4 mr-2" /> 全域感知矩阵 (16路)
+                </h3>
+                <div className="flex space-x-2 text-[10px] font-mono text-gray-500">
+                    <span className="flex items-center"><span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1"></span>在线</span>
+                    <span className="flex items-center"><span className="w-1.5 h-1.5 rounded-full bg-cyan-500 mr-1"></span>机器人</span>
+                </div>
+            </div>
+            
+            <div className="flex-1 overflow-hidden">
+                <div className="grid grid-cols-4 grid-rows-4 gap-2 h-full">
+                    {devices.map((dev, index) => (
+                        <div 
+                            key={dev.id}
+                            onClick={() => onSelect(index)} 
+                            className={`
+                                relative rounded border flex flex-col items-center justify-center transition-all cursor-pointer group
+                                ${activeIndex === index
+                                    ? 'bg-cyan-500/20 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)] z-10' 
+                                    : (dev.type === 'robot' 
+                                        ? 'bg-cyan-900/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10' 
+                                        : (dev.status === 'online' ? 'bg-green-900/10 border-green-500/20 text-green-600 hover:border-green-500/50' : 'bg-gray-800/20 border-gray-700 text-gray-600')
+                                      )
+                                }
+                            `}
+                        >
+                            {dev.type === 'robot' ? (
+                                <Bot className={`w-4 h-4 mb-0.5 ${activeIndex === index ? 'text-cyan-300' : 'text-cyan-600'}`} />
+                            ) : (
+                                <Video className={`w-4 h-4 mb-0.5 ${activeIndex === index ? 'text-cyan-300' : ''}`} />
+                            )}
+                            <span className="text-[10px] font-mono scale-90">{dev.id}</span>
+                            
+                            {/* 选中/轮播指示器 */}
+                            {activeIndex === index && (
+                                <>
+                                    <div className="absolute top-0 right-0 w-2 h-2 bg-cyan-400 rounded-bl-full"></div>
+                                    <div className="absolute inset-0 border border-cyan-400/50 animate-pulse rounded pointer-events-none"></div>
+                                </>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// 3. 轮播视窗 (POV & Monitor) - 已优化头部和样式统一
+const CarouselWindow = ({ device, isAuto }) => {
+    const [scanLine, setScanLine] = useState(0);
+    const isRobot = device.type === 'robot';
+
+    useEffect(() => {
+        const interval = setInterval(() => setScanLine(prev => (prev + 1) % 100), 50);
+        return () => clearInterval(interval);
+    }, []);
+
+    return (
+        <div className="flex flex-col h-full p-4 overflow-hidden relative">
+            {/* 顶部控制栏 */}
+            <div className="flex justify-between items-center mb-2 px-1 shrink-0">
+                <div className="flex items-center">
+                    <h3 className="text-cyan-400 font-bold flex items-center text-sm tracking-wider mr-4">
+                        {isRobot ? <Bot className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+                        实时监控画面
+                    </h3>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                    {/* Source ID 显示在右上角 */}
+                    <span className="text-sm font-mono text-cyan-300 font-bold">
+                        SOURCE: {device.id}
+                    </span>
+                    
+                    <div className="flex items-center space-x-2 bg-red-900/10 px-2 py-0.5 rounded border border-red-900/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                        <span className="text-[10px] font-mono text-red-400">LIVE</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* 核心视窗容器 */}
+            <div className="flex-1 bg-black rounded-lg border border-gray-800 flex flex-col overflow-hidden shadow-lg min-h-0 relative">
+                
+                {/* 轮播进度条 (仅在自动模式下显示) */}
+                {isAuto && (
+                    <div className="absolute top-0 left-0 h-[2px] bg-cyan-500 z-20 animate-[progress_3s_linear_infinite] w-full origin-left"></div>
+                )}
+
+                {/* Part A: 视频画面区 - 样式完全统一 */}
+                <div className="flex-1 relative bg-gray-900 overflow-hidden group min-h-0">
+                    {/* 统一的背景模拟 */}
+                    <div className="absolute w-[200%] h-[200%] bg-[length:50px_50px] opacity-30"
+                         style={{ 
+                             transform: 'scale(1)',
+                             backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px)' 
+                         }}
+                    >
+                    </div>
+                    
+                    {/* 画面内容 */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="text-gray-600 font-mono text-xs flex flex-col items-center">
+                             {isRobot ? <Bot className="w-12 h-12 mb-2 opacity-50" /> : <Aperture className="w-12 h-12 mb-2 opacity-50" />}
+                             <span>{device.name} 信号传输正常</span>
+                        </div>
+                    </div>
+
+                    {/* 扫描线 */}
+                    <div 
+                        className="absolute w-full h-[2px] bg-cyan-400/10 pointer-events-none"
+                        style={{ top: `${scanLine}%` }}
+                    ></div>
+                    
+                    {/* 装饰角标 */}
+                    <div className="absolute top-2 left-2 w-2 h-2 border-t-2 border-l-2 border-cyan-500/50"></div>
+                    <div className="absolute top-2 right-2 w-2 h-2 border-t-2 border-r-2 border-cyan-500/50"></div>
+                    <div className="absolute bottom-2 left-2 w-2 h-2 border-b-2 border-l-2 border-cyan-500/50"></div>
+                    <div className="absolute bottom-2 right-2 w-2 h-2 border-b-2 border-r-2 border-cyan-500/50"></div>
+                </div>
+
+                {/* Part B: 数据仪表盘 (单行布局) */}
+                <div className="h-14 bg-[#0d131f] border-t border-gray-800 flex items-center shrink-0 divide-x divide-gray-800">
+                    
+                    {isRobot ? (
+                        /* 机器人数据面板 - Flex Row */
+                        <>
+                            <div className="flex-1 flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 flex items-center mb-0.5"><Battery className="w-3 h-3 mr-1"/> 动力</div>
+                                <div className="flex items-center space-x-2">
+                                    <span className="text-sm font-mono text-green-400 font-bold">{device.battery}%</span>
+                                    <div className="w-8 h-1 bg-gray-800 rounded-full overflow-hidden">
+                                        <div className="h-full bg-green-500" style={{width: `${device.battery}%`}}></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex-1 flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 flex items-center mb-0.5"><Cpu className="w-3 h-3 mr-1"/> 负载</div>
+                                <div className="flex items-center space-x-2">
+                                    <span className="text-sm font-mono text-cyan-400 font-bold">{device.cpu}%</span>
+                                    <span className="text-[9px] text-gray-500">{device.temp}°C</span>
+                                </div>
+                            </div>
+                            <div className="flex-1 flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 flex items-center mb-0.5"><Activity className="w-3 h-3 mr-1"/> 速度</div>
+                                <span className="text-sm font-mono text-white font-bold">{device.speed} m/s</span>
+                            </div>
+                            <div className="flex-1 flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 flex items-center mb-0.5"><Signal className="w-3 h-3 mr-1"/> 信号</div>
+                                <span className="text-sm font-mono text-green-400 font-bold">12ms</span>
+                            </div>
+                        </>
+                    ) : (
+                        /* 摄像头数据面板 - Flex Row */
+                        <>
+                            <div className="flex-1 flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 mb-0.5">状态</div>
+                                <span className={`text-sm font-mono font-bold ${device.status === 'online' ? 'text-green-400' : 'text-red-400'}`}>
+                                    {device.status ? device.status.toUpperCase() : 'UNKNOWN'}
+                                </span>
+                            </div>
+                            <div className="flex-[1.5] flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 mb-0.5 flex items-center"><MapPin className="w-3 h-3 mr-1"/>区域</div>
+                                <span className="text-sm font-bold text-white truncate w-full text-center">{device.region}</span>
+                            </div>
+                            <div className="flex-[1.5] flex flex-col justify-center items-center px-2">
+                                <div className="text-[10px] text-gray-500 mb-0.5 flex items-center"><FileVideo className="w-3 h-3 mr-1"/>码流</div>
+                                <span className="text-sm font-mono text-cyan-400">1080P/H.265</span>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// 4. 核心：3D 全息仓库 (支持点击机器人)
+const HologramMap = ({ onRobotClick }) => {
+    const [botPos, setBotPos] = useState({ x: 30, y: 40 });
+    
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setBotPos(prev => ({
+                x: Math.min(90, Math.max(10, prev.x + (Math.random() - 0.5) * 5)),
+                y: Math.min(80, Math.max(20, prev.y + (Math.random() - 0.5) * 5))
+            }));
+        }, 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const renderRacks = (count, startX, startY, colorClass) => {
+        return Array.from({ length: count }).map((_, i) => (
+            <div 
+                key={i}
+                className={`absolute w-8 h-12 border border-opacity-50 ${colorClass} bg-opacity-10 backdrop-blur-[1px] transform transition-all hover:translate-y-[-5px] hover:bg-opacity-30`}
+                style={{ 
+                    left: `${startX + (i % 5) * 12}%`, 
+                    top: `${startY + Math.floor(i / 5) * 20}%`,
+                    boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)',
+                }}
+            >
+                <div className={`absolute -top-1 left-0 w-full h-1 ${colorClass.replace('border-', 'bg-')} opacity-50`}></div>
+            </div>
+        ));
+    };
+
+    return (
+        <div className="relative w-full h-full bg-[#05080e] rounded-xl overflow-hidden border border-cyan-900/30 flex items-center justify-center perspective-[1000px] group">
+            <div className="absolute inset-0 bg-[linear-gradient(rgba(6,182,212,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.1)_1px,transparent_1px)] bg-[length:40px_40px] opacity-20 transform-gpu"
+                 style={{ transform: 'rotateX(45deg) scale(1.5)' }}></div>
+
+            <div className="relative w-[80%] h-[80%] transform-style-3d rotate-x-60 rotate-z-[-20deg] transition-transform duration-1000 group-hover:rotate-z-0" 
+                 style={{ transform: 'rotateX(50deg) rotateZ(-10deg) translateZ(-50px)' }}>
+                
+                <div className="absolute top-0 left-0 w-full h-full">
+                    {renderRacks(15, 5, 5, 'border-cyan-500 bg-cyan-900')}
+                </div>
+
+                <div className="absolute bottom-10 right-10 w-40 h-32 border-2 border-dashed border-emerald-500/30 bg-emerald-900/10 rounded flex items-center justify-center">
+                    <span className="text-emerald-500/50 font-mono transform rotate-[-45deg]">室内地堆区 B</span>
+                </div>
+
+                 <div className="absolute top-10 right-5 w-32 h-24 border border-yellow-500/30 bg-yellow-900/10 rounded">
+                    <span className="absolute -top-6 text-yellow-500/70 text-xs">验收区</span>
+                 </div>
+
+                {/* 机器人 1 (可点击) */}
+                <div 
+                    onClick={() => onRobotClick(14)} // R-01 在列表中的 index 是 14
+                    className="absolute w-4 h-4 bg-white rounded-full shadow-[0_0_15px_rgba(255,255,255,0.8)] z-20 cursor-pointer hover:scale-150 transition-all duration-1000 ease-in-out"
+                    style={{ left: `${botPos.x}%`, top: `${botPos.y}%` }}
+                >
+                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-white text-[8px] px-1 py-0.5 rounded border border-white/20 whitespace-nowrap pointer-events-none">
+                        R-01 [作业]
+                    </div>
+                    <div className="absolute inset-0 border border-cyan-400 rounded-full animate-ping opacity-50 pointer-events-none"></div>
+                </div>
+
+                 {/* 机器人 2 (可点击) */}
+                 <div 
+                    onClick={() => onRobotClick(15)} // R-02 在列表中的 index 是 15
+                    className="absolute w-4 h-4 bg-yellow-400 rounded-full shadow-[0_0_15px_rgba(250,204,21,0.8)] z-20 cursor-pointer hover:scale-150 transition-all duration-[2000ms] ease-linear"
+                    style={{ left: `${100 - botPos.x}%`, top: `${botPos.y + 10}%` }}
+                >
+                     <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-yellow-400 text-[8px] px-1 py-0.5 rounded border border-yellow-500/20 whitespace-nowrap pointer-events-none">
+                        R-02 [巡航]
+                    </div>
+                </div>
+            </div>
+
+            <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
+                <div className="bg-black/40 backdrop-blur px-3 py-2 rounded border border-cyan-500/30 pointer-events-auto">
+                    <h3 className="text-cyan-400 text-xs font-bold mb-1">视图控制</h3>
+                    <div className="flex space-x-2 text-[10px] text-gray-400">
+                        <button className="hover:text-white">[旋转]</button>
+                        <button className="hover:text-white">[缩放]</button>
+                        <button className="hover:text-white">[锁定]</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// --- 主布局 ---
+const App = () => {
+    // 状态管理
+    const [activeIndex, setActiveIndex] = useState(14); // 默认选中 R-01 (index 14)
+    const [isAutoRotation, setIsAutoRotation] = useState(true);
+
+    // 自动轮播逻辑
+    useEffect(() => {
+        let interval;
+        if (isAutoRotation) {
+            interval = setInterval(() => {
+                setActiveIndex((prev) => (prev + 1) % ALL_DEVICES.length);
+            }, 3000); // 3秒切换一次
+        }
+        return () => clearInterval(interval);
+    }, [isAutoRotation]);
+
+    // 手动选择处理
+    const handleSelect = (index) => {
+        setActiveIndex(index);
+        setIsAutoRotation(false); // 手动选择时暂停轮播
+    };
+
+    const toggleAuto = () => {
+        setIsAutoRotation(!isAutoRotation);
+    };
+
+    return (
+        <div className="h-screen bg-[#020408] text-white font-sans overflow-hidden flex flex-col selection:bg-cyan-500/30">
+            <Header />
+
+            <div className="flex-1 p-4 grid grid-cols-12 gap-4 min-h-0">
+                
+                {/* 左侧主视觉: 3D 全息图 (占据 8/12) */}
+                <div className="col-span-8 h-full flex flex-col relative">
+                    <div className="absolute top-2 left-2 z-10 flex space-x-2">
+                        <div className="bg-cyan-900/20 text-cyan-400 px-2 py-1 rounded text-xs border border-cyan-500/20 font-mono">
+                            区域: 室内货架 A
+                        </div>
+                        <div className="bg-emerald-900/20 text-emerald-400 px-2 py-1 rounded text-xs border border-emerald-500/20 font-mono">
+                            模式: 实时孪生
+                        </div>
+                    </div>
+                    {/* 地图上的点击事件也映射到全局选择 */}
+                    <HologramMap onRobotClick={handleSelect} />
+                </div>
+
+                {/* 右侧整合信息栏 (占据 4/12) */}
+                <div className="col-span-4 h-full bg-[#0a0f18]/80 backdrop-blur border border-cyan-900/30 rounded-xl flex flex-col overflow-hidden">
+                    
+                    {/* 上半部分: 全域感知矩阵 (16格) */}
+                    <div className="h-[50%] border-b border-cyan-900/30 overflow-hidden relative">
+                        <HardwareMatrix 
+                            devices={ALL_DEVICES}
+                            activeIndex={activeIndex}
+                            onSelect={handleSelect} 
+                        />
+                    </div>
+
+                    {/* 下半部分: 轮播视窗 (POV & Monitor) */}
+                    <div className="flex-1 min-h-0 overflow-hidden relative">
+                         <CarouselWindow 
+                            device={ALL_DEVICES[activeIndex]} 
+                            isAuto={isAutoRotation}
+                            // onToggleAuto={toggleAuto} // 已移除按钮
+                         />
+                    </div>
+                </div>
+            </div>
+
+            <style>{`
+                @keyframes povMove {
+                    0% { background-position: 0 0; }
+                    100% { background-position: 0 50px; }
+                }
+                @keyframes progress {
+                    0% { transform: scaleX(0); }
+                    100% { transform: scaleX(1); }
+                }
+                .perspective-1000 {
+                    perspective: 1000px;
+                }
+                .transform-style-3d {
+                    transform-style: preserve-3d;
+                }
+                .animate-spin-slow {
+                    animation: spin 3s linear infinite;
+                }
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 4px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: #374151;
+                    border-radius: 2px;
+                }
+            `}</style>
+        </div>
+    );
+};
+
+export default App;
